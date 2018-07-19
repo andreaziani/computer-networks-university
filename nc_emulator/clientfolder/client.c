@@ -34,6 +34,8 @@ struct utilities{
 
 void * r_data(void *arg){
     struct utilities * u = (struct utilities *) arg;
+    // printf("\n rdata \n ");
+    // fflush(stdin);
     while(1){
         u->byteRecv = recvfrom(u->server_socket_fd, u->receivedData, MAX_BUF_SIZE, 0, (struct sockaddr *)&(u->server_addr), &(u->serv_size));
         printf("server port: %d ", u->SERVER_PORT);
@@ -46,6 +48,8 @@ void * r_data(void *arg){
 }
 
 void * s_data(void *arg){
+    //printf("\n sdata \n");
+    //fflush(stdin);
     struct utilities * u = (struct utilities *) arg;
     while(1){
         fflush(stdin);
@@ -79,7 +83,8 @@ int main(int argc, char *argv[]){
     u->server_addr.sin_port = htons(u->SERVER_PORT);
     u->server_addr.sin_addr.s_addr = inet_addr(u->ip_address);
     u->serv_size = sizeof(u->server_addr);
-
+    // printf("\n main \n");
+    // fflush(stdin);
     pthread_t    th[2]; 
 	int  rc, i;
 	void *ptr; 
