@@ -47,6 +47,7 @@ struct pkt {
 #define   A    0
 #define   B    1
 #define   FIRST_SEQNO   0
+#define   SECOND_SEQNO  1
 #define   WAIT_LAYER5   0
 #define   WAIT_ACK      1
 
@@ -95,9 +96,9 @@ int get_checksum(struct pkt *packet) {
 /* called from layer 5, passed the data to be sent to other side */
 void A_output (message) struct msg message;
 {
-  if(sideA.state == WAIT_ACK) 
+  if(sideA.state != WAIT_LAYER5) 
   {
-    printf("A_output: not yet acked. message dropped \n");
+    printf("A_output: not yet acked. Can't send other message \n");
     return;
   }
   printf("A_output: packet send -> %s\n", message.data);
@@ -128,7 +129,8 @@ void A_input(packet) struct pkt packet;
 
   printf("A_input: packet acked \n.");
   stoptimer(A);
-  sideA.seqN = (sideA.seqN == 1 ? 0 : 1);
+  sideA.seqN = (sideA.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO);
+  sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); // mettendo qui l'aggiornamento del snum di B sono syncati
   sideA.state = WAIT_LAYER5;
 }
 
@@ -149,7 +151,7 @@ void A_timerinterrupt (void)
 /* entity A routines are called. You can use it to do any initialization */
 void A_init (void)
 {
-  sideA.rtt = 10;
+  sideA.rtt = 20;
   sideA.state = WAIT_LAYER5;
   sideA.seqN = 0;
 } 
@@ -165,18 +167,18 @@ void send_ack(int side, int ack) {
 void B_input (packet) struct pkt packet;
 {
     if (packet.checksum != get_checksum(&packet)) {
-        printf("  B_input: packet corrupted.\n");
+        printf("B_input: packet corrupted.\n");
         return;
     }
-    if (packet.seqnum != sideB.seqN) {
-        printf("  B_input: not the expected seq.\n");
-        return;
-    }
-    printf("  B_input: recv message: %s\n", packet.payload);
-    printf("  B_input: send ACK.\n");
+    // if (packet.seqnum != sideB.seqN) {
+    //     printf("B_input: not the expected seq.\n");
+    //     return;
+    // }
+    printf("B_input: recv message: %s\n", packet.payload);
+    printf("B_input: send ACK.\n");
     send_ack(B, sideB.seqN);
     tolayer5(packet.payload);
-    sideB.seqN = (sideB.seqN == 1 ? 0 : 1);
+    // sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); // può dare problemi se l'ack di B viene corrotto, B aumenta comunque il seqN e non riesce più ad ackare il pacchetto di A.
 }
 
 
