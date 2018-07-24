@@ -101,7 +101,7 @@ void A_output (message) struct msg message;
     printf("A_output: not yet acked. Can't send other message \n");
     return;
   }
-  printf("A_output: packet send -> %s\n", message.data);
+  printf("A_output: packet with snum %d send -> %s\n", sideA.seqN, message.data);
   struct pkt packet;
   packet.seqnum = sideA.seqN;
   memmove(packet.payload, message.data, 20);
@@ -127,10 +127,10 @@ void A_input(packet) struct pkt packet;
     return;
   }
 
-  printf("A_input: packet acked \n.");
+  printf("A_input: packet with snum %d acked.\n.", sideA.seqN);
   stoptimer(A);
   sideA.seqN = (sideA.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO);
-  sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); // mettendo qui l'aggiornamento del snum di B sono syncati
+  printf("A_input: update snum -> %d \n", sideA.seqN);
   sideA.state = WAIT_LAYER5;
 }
 
@@ -170,15 +170,17 @@ void B_input (packet) struct pkt packet;
         printf("B_input: packet corrupted.\n");
         return;
     }
-    // if (packet.seqnum != sideB.seqN) {
-    //     printf("B_input: not the expected seq.\n");
-    //     return;
-    // }
     printf("B_input: recv message: %s\n", packet.payload);
-    printf("B_input: send ACK.\n");
-    send_ack(B, sideB.seqN);
-    tolayer5(packet.payload);
-    // sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); // può dare problemi se l'ack di B viene corrotto, B aumenta comunque il seqN e non riesce più ad ackare il pacchetto di A.
+    printf("B_input: send ACK for snum -> %d \n", packet.seqnum);
+    if (packet.seqnum == sideB.seqN) {
+        send_ack(B, sideB.seqN);
+        tolayer5(packet.payload);
+        sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); 
+        printf("B_input: update snum -> %d \n", sideB.seqN);
+    } else {
+        send_ack(B, (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO));
+        tolayer5(packet.payload);
+    }
 }
 
 
