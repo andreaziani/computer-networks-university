@@ -98,7 +98,7 @@ void A_output (message) struct msg message;
 {
   if(sideA.state != WAIT_LAYER5) 
   {
-    printf("A_output: not yet acked. Can't send other message \n");
+    printf("A_output: a packet is not yet acked. Can't send other message \n");
     return;
   }
   printf("A_output: packet with snum %d send -> %s\n", sideA.seqN, message.data);
