@@ -70,9 +70,6 @@ extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
 
-/********* YOU MAY ADD SOME ROUTINES HERE ********/
-
-/********* STUDENTS WRITE THE NEXT SIX ROUTINES *********/
 struct senderSide {
   int state;
   int seqN;
@@ -83,6 +80,56 @@ struct senderSide {
 struct receiverSide {
   int seqN;
 } sideB;
+
+struct Node 
+{
+	char * data;
+	struct Node* next;
+};
+
+// Two global variables to store address of front and rear nodes. 
+struct Node* front = NULL;
+struct Node* rear = NULL;
+
+//To enqueue a node.
+void enqueue(struct msg * message) 
+{
+	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
+  temp->data = malloc(sizeof(char[20]));
+  for(int i = 0; i < 20; i++)
+    temp->data[i] = message->data[i];
+	temp->next = NULL;
+	if(front == NULL && rear == NULL)
+    {
+		front = rear = temp;
+		return;
+	}
+	rear->next = temp;
+	rear = temp;
+}
+
+// To dequeue a node.
+void dequeue() 
+{
+	struct Node* temp = front;
+	if(front == NULL)
+		return;
+	if(front == rear) 
+		front = rear = NULL;
+	else 
+		front = front->next;
+	// free(temp->message);
+  free(temp);
+  
+}
+
+//pop front.
+char * p_front() 
+{
+	if(front == NULL)
+		return NULL;
+	return front->data;
+}
 
 int get_checksum(struct pkt *packet) {
     int checksum = 0;
@@ -98,13 +145,26 @@ void A_output (message) struct msg message;
 {
   if(sideA.state != WAIT_LAYER5) 
   {
-    printf("A_output: a packet is not yet acked. Can't send other message \n");
+    printf("A_output: a packet is not yet acked. Message enqueued -> ");
+    for(int i = 0; i < 20; i++) // to print the payload.
+    printf("%c", message.data[i]);
+    printf("\n");
+    enqueue(&message); // add message to the queue.
     return;
   }
-  printf("A_output: packet with snum %d send -> %s\n", sideA.seqN, message.data);
+  enqueue(&message); // insert message in the first pos of the queue.
   struct pkt packet;
   packet.seqnum = sideA.seqN;
-  memmove(packet.payload, message.data, 20);
+
+  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
+    packet.payload[i] = p_front()[i];
+
+  printf("A_output: packet with snum %d send -> ", sideA.seqN);
+  
+  for(int i = 0; i < 20; i++) // to print the payload.
+    printf("%c", packet.payload[i]);
+  printf("\n");
+
   packet.checksum = get_checksum(&packet);
   sideA.last_packet = packet;
   sideA.state = WAIT_ACK;
@@ -130,6 +190,7 @@ void A_input(packet) struct pkt packet;
   printf("A_input: packet with snum %d acked.\n", sideA.seqN);
   stoptimer(A);
   sideA.seqN = (sideA.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO);
+  dequeue(); // if acked dequeue the first.
   printf("A_input: update snum -> %d \n", sideA.seqN);
   sideA.state = WAIT_LAYER5;
 }
@@ -142,7 +203,11 @@ void A_timerinterrupt (void)
     printf(" A_timerinterrupt: A is not waiting ack. \n");
     return;
   }
-  printf("A_timerinterrupt: A is resending packet: %s \n", sideA.last_packet.payload);
+  printf("A_timerinterrupt: A is resending packet: ");
+  for(int i = 0; i < 20; i++) {
+    printf("%c", sideA.last_packet.payload[i]);
+  }
+  printf("\n");
   tolayer3(A, sideA.last_packet);
   starttimer(A, sideA.rtt);
 } 
