@@ -127,7 +127,7 @@ void A_input(packet) struct pkt packet;
     return;
   }
 
-  printf("A_input: packet with snum %d acked.\n.", sideA.seqN);
+  printf("A_input: packet with snum %d acked.\n", sideA.seqN);
   stoptimer(A);
   sideA.seqN = (sideA.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO);
   printf("A_input: update snum -> %d \n", sideA.seqN);
@@ -179,7 +179,7 @@ void B_input (packet) struct pkt packet;
         printf("B_input: update snum -> %d \n", sideB.seqN);
     } else {
         send_ack(B, (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO));
-        tolayer5(packet.payload);
+        // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
     }
 }
 
