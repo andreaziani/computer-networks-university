@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <strings.h>
-#include <string.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/file.h>
@@ -47,9 +46,6 @@ struct pkt {
 #define   A    0
 #define   B    1
 #define   FIRST_SEQNO   0
-#define   SECOND_SEQNO  1
-#define   WAIT_LAYER5   0
-#define   WAIT_ACK      1
 
 /*- Declarations ------------------------------------------------------------*/
 void	restart_rxmt_timer(void);
@@ -70,195 +66,51 @@ extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
 
-struct senderSide {
-  int state;
-  int seqN;
-  double rtt;
-  struct pkt last_packet;
-} sideA;
+/********* YOU MAY ADD SOME ROUTINES HERE ********/
 
-struct receiverSide {
-  int seqN;
-} sideB;
-
-struct Node 
-{
-	char * data;
-	struct Node* next;
-};
-
-// Two global variables to store address of front and rear nodes. 
-struct Node* front = NULL;
-struct Node* rear = NULL;
-
-//To enqueue a node.
-void enqueue(struct msg * message) 
-{
-	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
-  temp->data = malloc(sizeof(char[20]));
-  for(int i = 0; i < 20; i++)
-    temp->data[i] = message->data[i];
-	temp->next = NULL;
-	if(front == NULL && rear == NULL)
-    {
-		front = rear = temp;
-		return;
-	}
-	rear->next = temp;
-	rear = temp;
-}
-
-// To dequeue a node.
-void dequeue() 
-{
-	struct Node* temp = front;
-	if(front == NULL)
-		return;
-	if(front == rear) 
-		front = rear = NULL;
-	else 
-		front = front->next;
-	// free(temp->message);
-  free(temp);
-  
-}
-
-//pop front.
-char * p_front() 
-{
-	if(front == NULL)
-		return NULL;
-	return front->data;
-}
-
-int get_checksum(struct pkt *packet) {
-    int checksum = 0;
-    checksum += packet->seqnum;
-    checksum += packet->acknum;
-    for (int i = 0; i < 20; ++i)
-        checksum += packet->payload[i];
-    return checksum;
-}
+/********* STUDENTS WRITE THE NEXT SIX ROUTINES *********/
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output (message) struct msg message;
 {
-  if(sideA.state != WAIT_LAYER5) 
-  {
-    printf("A_output: a packet is not yet acked. Message enqueued -> ");
-    for(int i = 0; i < 20; i++) // to print the payload.
-    printf("%c", message.data[i]);
-    printf("\n");
-    enqueue(&message); // add message to the queue.
-    return;
-  }
-  
-  enqueue(&message); // insert message in the last pos of the queue.
-  printf("A_output: Message enqueued -> ");
-  for(int i = 0; i < 20; i++) // to print the payload.
-    printf("%c", message.data[i]);
-
-  struct pkt packet;
-  packet.seqnum = sideA.seqN;
-  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
-    packet.payload[i] = p_front()[i];
-  printf("\n");
-
-  printf("A_output: packet with snum %d send -> ", sideA.seqN);
-  
-  for(int i = 0; i < 20; i++) // to print the payload.
-    printf("%c", packet.payload[i]);
-  printf("\n");
-
-  packet.checksum = get_checksum(&packet);
-  sideA.last_packet = packet;
-  sideA.state = WAIT_ACK;
-  tolayer3(A, packet);
-  starttimer(A, sideA.rtt);
+ 
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(packet) struct pkt packet;
 {	
-  if(sideA.state != WAIT_ACK) 
-  {
-    printf("A_input: message dropped \n");
-    return;
-  } else if (packet.checksum != get_checksum(&packet)) {
-    printf("A_input: packet corrupted \n");
-    return;
-  } else if (packet.acknum != sideA.seqN) {
-    printf("A_input: not expected ack \n");
-    return;
-  }
 
-  printf("A_input: packet with snum %d acked.\n", sideA.seqN);
-  stoptimer(A);
-  sideA.seqN = (sideA.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO);
-  dequeue(); // if acked dequeue the first.
-  printf("A_input: update snum -> %d \n", sideA.seqN);
-  sideA.state = WAIT_LAYER5;
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt (void)
 {
-  if(sideA.state != WAIT_ACK)
-  {
-    printf(" A_timerinterrupt: A is not waiting ack. \n");
-    return;
-  }
-  printf("A_timerinterrupt: A is resending packet: ");
-  for(int i = 0; i < 20; i++) {
-    printf("%c", sideA.last_packet.payload[i]);
-  }
-  printf("\n");
-  tolayer3(A, sideA.last_packet);
-  starttimer(A, sideA.rtt);
+
 } 
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
-void A_init (void)
+void
+A_init (void)
 {
-  sideA.rtt = 20;
-  sideA.state = WAIT_LAYER5;
-  sideA.seqN = 0;
+
 } 
 
-void send_ack(int side, int ack) {
-    struct pkt packet;
-    packet.acknum = ack;
-    packet.checksum = get_checksum(&packet);
-    tolayer3(side, packet);
-}
-
 /* called from layer 3, when a packet arrives for layer 4 at B*/
-void B_input (packet) struct pkt packet;
+void
+B_input (packet)
+  struct pkt packet;
 {
-    if (packet.checksum != get_checksum(&packet)) {
-        printf("B_input: packet corrupted.\n");
-        return;
-    }
-    printf("B_input: recv message: %s\n", packet.payload);
-    printf("B_input: send ACK for snum -> %d \n", packet.seqnum);
-    if (packet.seqnum == sideB.seqN) {
-        send_ack(B, sideB.seqN);
-        tolayer5(packet.payload);
-        sideB.seqN = (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO); 
-        printf("B_input: update snum -> %d \n", sideB.seqN);
-    } else {
-        send_ack(B, (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO));
-        // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
-    }
+
 }
 
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
-void B_init (void)
+void
+B_init (void)
 {
-  sideB.seqN = 0;
+
 } 
 
 /*****************************************************************
