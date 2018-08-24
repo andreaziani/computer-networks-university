@@ -162,7 +162,7 @@ void A_output (message) struct msg message;
   packet.seqnum = sideA.seqN;
   for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
     packet.payload[i] = p_front()[i];
-  printf("\n");
+  print("\n");
 
   printf("A_output: packet with snum %d send -> ", sideA.seqN);
   
@@ -226,6 +226,7 @@ void A_init (void)
   sideA.seqN = 0;
 } 
 
+// function to send an ack.
 void send_ack(int side, int ack) {
     struct pkt packet;
     packet.acknum = ack;

@@ -69,48 +69,256 @@ extern double time_now;      // simulation time, for your debug purpose
 /********* YOU MAY ADD SOME ROUTINES HERE ********/
 
 /********* STUDENTS WRITE THE NEXT SIX ROUTINES *********/
+struct senderSide {
+  int timer_state;
+  int base;
+  int snum;
+  int window_size_A;
+  double rtt;
+} sideA;
+
+struct receiverSide {
+  int base;
+  int ack;
+  int window_size_B;
+} sideB;
+
+struct Node 
+{
+	char * data;
+	struct Node* next;
+};
+
+// Two global variables to store address of front and rear nodes. 
+struct Node* front_sended = NULL;
+struct Node* rear_sended = NULL;
+
+//To enqueue a node in a sended queue.
+void enqueue_sended(char * message) 
+{
+	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
+  temp->data = malloc(sizeof(char[20]));
+  for(int i = 0; i < 20; i++)
+    temp->data[i] = message[i];
+	temp->next = NULL;
+	if(front_sended == NULL && rear_sended == NULL)
+    {
+		front_sended = rear_sended = temp;
+		return;
+	}
+	rear_sended->next = temp;
+	rear_sended = temp;
+}
+
+// To dequeue a node in the sended queue.
+void dequeue_sended() 
+{
+	struct Node* temp = front_sended;
+	if(front_sended == NULL)
+		return;
+	if(front_sended == rear_sended) 
+		front_sended = rear_sended = NULL;
+	else 
+		front_sended = front_sended->next;
+	// free(temp->message);
+  free(temp);
+  
+}
+
+//pop front.
+char * p_front_sended() 
+{
+	if(front_sended == NULL)
+		return NULL;
+	return front_sended->data;
+}
+
+int get_checksum(struct pkt *packet) {
+    int checksum = 0;
+    checksum += packet->seqnum;
+    checksum += packet->acknum;
+    for (int i = 0; i < 20; ++i)
+        checksum += packet->payload[i];
+    return checksum;
+}
+
+// Two global variables to store address of front and rear nodes. 
+struct Node* front = NULL;
+struct Node* rear = NULL;
+
+//To enqueue a node.
+void enqueue(struct msg * message) 
+{
+	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
+  temp->data = malloc(sizeof(char[20]));
+  for(int i = 0; i < 20; i++)
+    temp->data[i] = message->data[i];
+	temp->next = NULL;
+	if(front == NULL && rear == NULL)
+    {
+		front = rear = temp;
+		return;
+	}
+	rear->next = temp;
+	rear = temp;
+}
+
+// To dequeue a node.
+void dequeue() 
+{
+	struct Node* temp = front;
+	if(front == NULL)
+		return;
+	if(front == rear) 
+		front = rear = NULL;
+	else 
+		front = front->next;
+	// free(temp->message);
+  free(temp);
+  
+}
+
+//pop front.
+char * p_front() 
+{
+	if(front == NULL)
+		return NULL;
+	return front->data;
+}
+
+// function to send an ack.
+void send_ack(int side, int ack) {
+    struct pkt packet;
+    packet.acknum = ack;
+    packet.checksum = get_checksum(&packet);
+    tolayer3(side, packet);
+}
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output (message) struct msg message;
 {
- 
+  if(sideA.window_size_A - sideA.snum <= 0)
+  {
+    printf("A_output: the window is full. Message enqueued in not sended queue-> ");
+    for(int i = 0; i < 20; i++) // to print the payload.
+    printf("%c", message.data[i]);
+    printf("\n");
+    enqueue(&message); // add message to the not sended queue.
+    return;
+  }
+
+  enqueue(&message); // insert message in the last pos of the not sended queue.
+  printf("A_output: Message enqueued in not sended queue-> ");
+  for(int i = 0; i < 20; i++) // to print the payload.
+    printf("%c", message.data[i]);
+  
+  struct pkt packet; // do the packet.
+  packet.seqnum = sideA.snum;
+  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
+    packet.payload[i] = p_front()[i];
+  printf("\n");
+  dequeue(); // delate the first message from the not sended queue.
+
+  printf("A_output: packet with snum %d send -> ", sideA.snum);
+  
+  for(int i = 0; i < 20; i++) // to print the payload.
+    printf("%c", packet.payload[i]);
+  printf("\n");
+
+  sideA.snum++; // increment snum.
+  printf("A_input: update snum -> %d \n", sideA.snum);
+  enqueue_sended(packet.payload); // enqueue the message in the sended queue.
+  packet.checksum = get_checksum(&packet);
+  tolayer3(A, packet);
+  
+  if(sideA.timer_state == 0) { // if the timer is not started yet.
+    starttimer(A, sideA.rtt);
+    sideA.timer_state = 1;
+  }
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(packet) struct pkt packet;
 {	
+  printf("A_input: snum -> %d , base -> %d \n", packet.acknum, sideA.base);
+  if(sideA.snum < packet.acknum || sideA.base != packet.acknum) 
+  {
+    printf("A_input: not expected ack. \n");
+    return;
+  } else if (packet.checksum != get_checksum(&packet)) {
+    printf("A_input: packet corrupted \n");
+    return;
+  } 
 
+  printf("A_input: packet with snum %d acked.\n", packet.acknum);
+
+  stoptimer(A);
+  sideA.timer_state = 0;
+  
+  sideA.base++;
+  sideA.window_size_A++;
+  dequeue_sended(); // if acked dequeue the first.
+  if(sideA.base < sideA.snum) { // if i have other packets sent restart the timer.
+    sideA.timer_state = 1;
+    starttimer(A, sideA.rtt);
+  }
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt (void)
 {
+  printf("A_timerinterrupt: A is resending packet: ");
+  for(int i = 0; i < 20; i++) {
+    printf("%c", p_front_sended()[i]);
+  }
+  printf("\n");
 
+  struct pkt packet; // do the packet.
+  packet.seqnum = sideA.base;
+  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
+    packet.payload[i] = p_front()[i];
+
+  tolayer3(A, packet);
+  starttimer(A, sideA.rtt);
 } 
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
-void
-A_init (void)
+void A_init (void)
 {
-
+  sideA.timer_state = 0;
+  sideA.rtt = 20;
+  sideA.base = 0;
+  sideA.snum = 0;
+  sideA.window_size_A = WINDOW_SIZE;
 } 
 
 /* called from layer 3, when a packet arrives for layer 4 at B*/
-void
-B_input (packet)
-  struct pkt packet;
+void B_input (packet) struct pkt packet;
 {
-
+  if (packet.checksum != get_checksum(&packet)) {
+    printf("B_input: packet corrupted.\n");
+    return;
+  }
+  printf("B_input: recv message: %s\n", packet.payload);
+  printf("B_input: send ACK for snum -> %d \n", packet.seqnum);
+  if (packet.seqnum == sideB.base) {
+    send_ack(B, sideB.base);
+    tolayer5(packet.payload);
+    sideB.base++;
+    printf("B_input: update snum -> %d \n", sideB.base);
+  } else {
+    send_ack(B, packet.seqnum);
+    // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
+  }
 }
 
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
-void
-B_init (void)
+void B_init (void)
 {
-
+  sideB.base = 0;
 } 
 
 /*****************************************************************
