@@ -73,15 +73,16 @@ extern double time_now;      // simulation time, for your debug purpose
 struct senderSide {
   int timer_state;
   int base;
-  int snum;
-  int window_size_A;
+  int snum; //next sequence number
+  int window_size_A; // index of the last element -> window_size_A - base = WINDOW_SIZE;
   int buffer_size;
   double rtt;
 } sideA;
 
 struct receiverSide {
   int base;
-  int ack;
+  int last_ack;
+  int * arrived_snum;
   int window_size_B;
 } sideB;
 
@@ -148,8 +149,8 @@ int get_checksum(struct pkt *packet) {
 struct Node* front = NULL;
 struct Node* rear = NULL;
 
-//To enqueue a node.
-void enqueue(struct msg * message) 
+//To enqueue_buffer a node.
+void enqueue_buffer(struct msg * message) 
 {
 	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
   temp->data = malloc(sizeof(char[20]));
@@ -166,7 +167,7 @@ void enqueue(struct msg * message)
 }
 
 // To dequeue a node.
-void dequeue() 
+void dequeue_buffer() 
 {
 	struct Node* temp = front;
 	if(front == NULL)
@@ -201,18 +202,18 @@ void A_output (message) struct msg message;
 {
   if(sideA.window_size_A - sideA.snum <= 0) // check if the window is full.
   {
-    printf("A_output: the window is full. Message enqueued in not sended queue-> ");
+    printf("A_output: the window is full. Message enqueued in buffer -> ");
     for(int i = 0; i < 20; i++) // to print the payload.
     printf("%c", message.data[i]);
     printf("\n");
-    enqueue(&message); // add message to the not sended queue. -> add the message in the buffer.
+    enqueue_buffer(&message); // add message in the buffer.
     sideA.buffer_size++;
     if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
       exit(0);
     return;
   }
 
-  enqueue(&message); // insert message in the last pos of the not sended queue -> insert in the buffer.
+  enqueue_buffer(&message); // insert message in the buffer.
   sideA.buffer_size++; 
   if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
     exit(0);
@@ -221,12 +222,15 @@ void A_output (message) struct msg message;
   for(int i = 0; i < 20; i++) // to print the payload.
     printf("%c", message.data[i]);
   
-  struct pkt packet; // do the packet.
+  /*creation of the packet*/
+  struct pkt packet;
   packet.seqnum = sideA.snum;
   for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
     packet.payload[i] = p_front()[i]; // take the first message in the buffer.
   printf("\n");
-  dequeue(); // delate the first message from the not sended queue (buffer).
+  packet.checksum = get_checksum(&packet);
+
+  dequeue_buffer(); // delate the first message from the buffer.
 
   printf("A_output: packet with snum %d send -> ", sideA.snum);
   
@@ -234,45 +238,15 @@ void A_output (message) struct msg message;
     printf("%c", packet.payload[i]);
   printf("\n");
 
-  packet.checksum = get_checksum(&packet);
-  tolayer3(A, packet);
+  tolayer3(A, packet); //send the packet to layer 3
 
-  sideA.snum++; // increment snum.
+  sideA.snum++; // increment the next sequence number.
   printf("A_output: update snum -> %d \n", sideA.snum);
   enqueue_sended(packet.payload); // enqueue the message in the sended queue.
-  
   
   if(sideA.timer_state == 0) { // if the timer is not started yet.
     starttimer(A, sideA.rtt);
     sideA.timer_state = 1;
-  }
-}
-
-/* called from layer 3, when a packet arrives for layer 4 */
-void A_input(packet) struct pkt packet;
-{	
-  printf("A_input: snum -> %d , base -> %d \n", packet.acknum, sideA.base);
-  if(sideA.snum < packet.acknum || sideA.base != packet.acknum) 
-  {
-    printf("A_input: not expected ack. \n");
-    return;
-  } else if (packet.checksum != get_checksum(&packet)) {
-    printf("A_input: packet corrupted \n");
-    return;
-  } 
-
-  printf("A_input: packet with snum %d acked.\n", packet.acknum);
-
-  stoptimer(A);
-  sideA.timer_state = 0;
-  
-  sideA.base++;
-  sideA.window_size_A++;
-  dequeue_sended(); // if acked dequeue the first.
-  sideA.buffer_size--;
-  if(sideA.base < sideA.snum) { // if i have other packets sent restart the timer.
-    sideA.timer_state = 1;
-    starttimer(A, sideA.rtt);
   }
 }
 
@@ -293,6 +267,43 @@ void A_timerinterrupt (void)
   starttimer(A, sideA.rtt);
 } 
 
+/* called from layer 3, when a packet arrives for layer 4 */
+void A_input(packet) struct pkt packet;
+{	
+  printf("A_input: acknum -> %d , base -> %d \n", packet.acknum, sideA.base);
+  if(sideA.snum < packet.acknum) // || sideA.base != packet.acknum 
+  {
+    printf("A_input: not expected ack. \n");
+    stoptimer(A);
+    A_timerinterrupt();
+    return;
+  } else if (packet.checksum != get_checksum(&packet)) {
+    printf("A_input: packet corrupted \n");
+    return;
+  } 
+  if(packet.acknum < sideA.base) {
+    printf("A_input: duplicate ack. \n");
+    return;
+  }
+
+  while(sideA.base <= packet.acknum) {
+    printf("A_input: packet with snum %d acked.\n", sideA.base);
+    sideA.base++;
+    sideA.window_size_A++;
+    dequeue_sended(); // if acked dequeue the first.
+    sideA.buffer_size--;
+  }
+
+  stoptimer(A);
+  sideA.timer_state = 0;
+  
+  if(sideA.base < sideA.snum) { // if i have other packets sent restart the timer.
+    sideA.timer_state = 1;
+    starttimer(A, sideA.rtt);
+  }
+}
+
+
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 void A_init (void)
@@ -305,6 +316,42 @@ void A_init (void)
   sideA.window_size_A = WINDOW_SIZE;
 } 
 
+void bubblesort(int v[], int n) {
+  int i,k;
+  int temp;
+  for(i = 0; i<n-1; i++) {
+    for(k = 0; k<n-1-i; k++) {
+      if(v[k] > v[k+1]) {
+        temp = v[k];
+        v[k] = v[k+1];
+        v[k+1] = temp;
+      }
+    }
+  }
+}
+
+int check_cumulative_ack() {
+  int count = 0;
+  int temp[WINDOW_SIZE];
+  int sequence = 0;
+  int number = -1;
+  for(int i = 0; i < WINDOW_SIZE; i++){
+    temp[i] = sideB.arrived_snum[i];
+  }
+  
+  bubblesort(temp, WINDOW_SIZE); // sort the temp array.
+
+  for(int i = 0; i < WINDOW_SIZE - 1; i++){ // find the increasing subsequence.
+    if(temp[i+1] == temp[i] + 1 || temp[i+1] == temp[i]){ // 2nd check -> -1 -1 -1 0
+      number = temp[i+1];
+    } else {
+      break;
+    }
+  }
+  return number % WINDOW_SIZE; // index of the arrived_snum;
+}
+
+
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input (packet) struct pkt packet;
 {
@@ -312,17 +359,33 @@ void B_input (packet) struct pkt packet;
     printf("B_input: packet corrupted.\n");
     return;
   }
-  printf("B_input: recv message: %s\n", packet.payload);
-  printf("B_input: send ACK for snum -> %d \n", packet.seqnum);
-  if (packet.seqnum == sideB.base) {
-    send_ack(B, sideB.base);
-    tolayer5(packet.payload);
+
+  if(packet.seqnum < sideB.last_ack) {
+    printf("B_input: recv message: %s\n", packet.payload);
+    printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
+    send_ack(B, sideB.last_ack);
+  } else {
+    printf("B_input: recv message: %s\n", packet.payload);
+    sideB.arrived_snum[(packet.seqnum % sideB.window_size_B)] = packet.seqnum;
+    int index = check_cumulative_ack();
+    if(index >= 0){
+      printf("B_input: send ACK for snum -> %d \n", sideB.arrived_snum[index]);
+      send_ack(B, sideB.arrived_snum[index]);
+      sideB.last_ack = sideB.arrived_snum[index];
+
+      tolayer5(packet.payload);
+    } else if(index < 0 && sideB.last_ack != -1) {
+      printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
+      send_ack(B, sideB.last_ack);
+    }
+  }
+  /* if (packet.seqnum == sideB.base) {
     sideB.base++;
     printf("B_input: update snum -> %d \n", sideB.base);
   } else {
     send_ack(B, packet.seqnum);
     // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
-  }
+  } */
 }
 
 
@@ -331,6 +394,11 @@ void B_input (packet) struct pkt packet;
 void B_init (void)
 {
   sideB.base = 0;
+  sideB.window_size_B = WINDOW_SIZE;
+  sideB.last_ack = -1;
+  sideB.arrived_snum = malloc(sizeof(int) * WINDOW_SIZE);
+  for(int i = 0; i < WINDOW_SIZE; i++)
+    sideB.arrived_snum[i] = -1;
 } 
 
 /*****************************************************************
