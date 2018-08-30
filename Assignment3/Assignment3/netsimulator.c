@@ -45,6 +45,7 @@ struct pkt {
 
 #define   A    0
 #define   B    1
+#define MAX_BUF_SIZE 50
 #define   FIRST_SEQNO   0
 
 /*- Declarations ------------------------------------------------------------*/
@@ -74,6 +75,7 @@ struct senderSide {
   int base;
   int snum;
   int window_size_A;
+  int buffer_size;
   double rtt;
 } sideA;
 
@@ -197,27 +199,34 @@ void send_ack(int side, int ack) {
 /* called from layer 5, passed the data to be sent to other side */
 void A_output (message) struct msg message;
 {
-  if(sideA.window_size_A - sideA.snum <= 0)
+  if(sideA.window_size_A - sideA.snum <= 0) // check if the window is full.
   {
     printf("A_output: the window is full. Message enqueued in not sended queue-> ");
     for(int i = 0; i < 20; i++) // to print the payload.
     printf("%c", message.data[i]);
     printf("\n");
-    enqueue(&message); // add message to the not sended queue.
+    enqueue(&message); // add message to the not sended queue. -> add the message in the buffer.
+    sideA.buffer_size++;
+    if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
+      exit(0);
     return;
   }
 
-  enqueue(&message); // insert message in the last pos of the not sended queue.
-  printf("A_output: Message enqueued in not sended queue-> ");
+  enqueue(&message); // insert message in the last pos of the not sended queue -> insert in the buffer.
+  sideA.buffer_size++; 
+  if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
+    exit(0);
+  
+  printf("A_output: Message enqueued in the buffer -> ");
   for(int i = 0; i < 20; i++) // to print the payload.
     printf("%c", message.data[i]);
   
   struct pkt packet; // do the packet.
   packet.seqnum = sideA.snum;
   for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
-    packet.payload[i] = p_front()[i];
+    packet.payload[i] = p_front()[i]; // take the first message in the buffer.
   printf("\n");
-  dequeue(); // delate the first message from the not sended queue.
+  dequeue(); // delate the first message from the not sended queue (buffer).
 
   printf("A_output: packet with snum %d send -> ", sideA.snum);
   
@@ -225,11 +234,13 @@ void A_output (message) struct msg message;
     printf("%c", packet.payload[i]);
   printf("\n");
 
-  sideA.snum++; // increment snum.
-  printf("A_input: update snum -> %d \n", sideA.snum);
-  enqueue_sended(packet.payload); // enqueue the message in the sended queue.
   packet.checksum = get_checksum(&packet);
   tolayer3(A, packet);
+
+  sideA.snum++; // increment snum.
+  printf("A_output: update snum -> %d \n", sideA.snum);
+  enqueue_sended(packet.payload); // enqueue the message in the sended queue.
+  
   
   if(sideA.timer_state == 0) { // if the timer is not started yet.
     starttimer(A, sideA.rtt);
@@ -258,6 +269,7 @@ void A_input(packet) struct pkt packet;
   sideA.base++;
   sideA.window_size_A++;
   dequeue_sended(); // if acked dequeue the first.
+  sideA.buffer_size--;
   if(sideA.base < sideA.snum) { // if i have other packets sent restart the timer.
     sideA.timer_state = 1;
     starttimer(A, sideA.rtt);
@@ -272,12 +284,11 @@ void A_timerinterrupt (void)
     printf("%c", p_front_sended()[i]);
   }
   printf("\n");
-
   struct pkt packet; // do the packet.
   packet.seqnum = sideA.base;
   for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
-    packet.payload[i] = p_front()[i];
-
+    packet.payload[i] = p_front_sended()[i];
+  packet.checksum = get_checksum(&packet);
   tolayer3(A, packet);
   starttimer(A, sideA.rtt);
 } 
@@ -289,7 +300,8 @@ void A_init (void)
   sideA.timer_state = 0;
   sideA.rtt = 20;
   sideA.base = 0;
-  sideA.snum = 0;
+  sideA.snum = FIRST_SEQNO;
+  sideA.buffer_size = 0;
   sideA.window_size_A = WINDOW_SIZE;
 } 
 
