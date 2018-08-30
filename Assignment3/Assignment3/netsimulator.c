@@ -316,41 +316,30 @@ void A_init (void)
   sideA.window_size_A = WINDOW_SIZE;
 } 
 
-void bubblesort(int v[], int n) {
-  int i,k;
-  int temp;
-  for(i = 0; i<n-1; i++) {
-    for(k = 0; k<n-1-i; k++) {
-      if(v[k] > v[k+1]) {
-        temp = v[k];
-        v[k] = v[k+1];
-        v[k+1] = temp;
+int check_cumulative_ack() {
+  int seq = 0, finalseq = 0;
+  int index = -1;
+  int temp[WINDOW_SIZE*2];
+
+  for(int i = 0; i < WINDOW_SIZE; i++){ // double array to bypass circles.
+    temp[i] = sideB.arrived_snum[i];
+    temp[i+WINDOW_SIZE] = sideB.arrived_snum[i];
+  }
+  
+  for(int i = 0; i < WINDOW_SIZE * 2 - 1; i++) {
+    if(temp[i] == -1)
+      break;
+    if(temp[i+1] == temp[i] + 1)
+      seq++;
+    else {
+      if(seq > finalseq) {
+        finalseq = seq;
+        index = (i % WINDOW_SIZE);
       }
     }
   }
+  return index;
 }
-
-int check_cumulative_ack() {
-  int count = 0;
-  int temp[WINDOW_SIZE];
-  int sequence = 0;
-  int number = -1;
-  for(int i = 0; i < WINDOW_SIZE; i++){
-    temp[i] = sideB.arrived_snum[i];
-  }
-  
-  bubblesort(temp, WINDOW_SIZE); // sort the temp array.
-
-  for(int i = 0; i < WINDOW_SIZE - 1; i++){ // find the increasing subsequence.
-    if(temp[i+1] == temp[i] + 1 || temp[i+1] == temp[i]){ // 2nd check -> -1 -1 -1 0
-      number = temp[i+1];
-    } else {
-      break;
-    }
-  }
-  return number % WINDOW_SIZE; // index of the arrived_snum;
-}
-
 
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input (packet) struct pkt packet;
