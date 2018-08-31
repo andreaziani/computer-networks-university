@@ -76,6 +76,7 @@ struct senderSide {
   int snum; //next sequence number
   int window_size_A; // index of the last element -> window_size_A - base = WINDOW_SIZE;
   int buffer_size;
+  int count_duplicate_acks;
   double rtt;
 } sideA;
 
@@ -193,6 +194,7 @@ char * p_front()
 void send_ack(int side, int ack) {
     struct pkt packet;
     packet.acknum = ack;
+    printf("SEND_ACK: acknum -> %d \n", packet.acknum);
     packet.checksum = get_checksum(&packet);
     tolayer3(side, packet);
 }
@@ -208,16 +210,20 @@ void A_output (message) struct msg message;
     printf("\n");
     enqueue_buffer(&message); // add message in the buffer.
     sideA.buffer_size++;
-    if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
+    if(sideA.buffer_size > MAX_BUF_SIZE) { // if the buffer is full exit.
+      printf("\n===============================> BUFFER IS FULL EXIT <====================================== \n");
       exit(0);
+    } 
+
     return;
   }
 
   enqueue_buffer(&message); // insert message in the buffer.
   sideA.buffer_size++; 
-  if(sideA.buffer_size > MAX_BUF_SIZE) // if the buffer is full exit.
+  if(sideA.buffer_size > MAX_BUF_SIZE) { // if the buffer is full exit.
+    printf("\n===============================> BUFFER IS FULL EXIT <====================================== \n");
     exit(0);
-  
+  }
   printf("A_output: Message enqueued in the buffer -> ");
   for(int i = 0; i < 20; i++) // to print the payload.
     printf("%c", message.data[i]);
@@ -271,18 +277,18 @@ void A_timerinterrupt (void)
 void A_input(packet) struct pkt packet;
 {	
   printf("A_input: acknum -> %d , base -> %d \n", packet.acknum, sideA.base);
-  if(sideA.snum < packet.acknum) // || sideA.base != packet.acknum 
-  {
-    printf("A_input: not expected ack. \n");
-    stoptimer(A);
-    A_timerinterrupt();
-    return;
-  } else if (packet.checksum != get_checksum(&packet)) {
+  if (packet.checksum != get_checksum(&packet)) {
     printf("A_input: packet corrupted \n");
     return;
   } 
   if(packet.acknum < sideA.base) {
     printf("A_input: duplicate ack. \n");
+    sideA.count_duplicate_acks++;
+    if(sideA.count_duplicate_acks > 2){ // if receiver receive 3 duplicate acks -> stop the timer and resent the base packet.
+      sideA.count_duplicate_acks = 0;
+      stoptimer(A);
+      A_timerinterrupt();
+    }
     return;
   }
 
@@ -314,10 +320,11 @@ void A_init (void)
   sideA.snum = FIRST_SEQNO;
   sideA.buffer_size = 0;
   sideA.window_size_A = WINDOW_SIZE;
+  sideA.count_duplicate_acks = 0;
 } 
 
 int check_cumulative_ack() {
-  int seq = 0, finalseq = 0;
+  int seq = 1, finalseq = 0;
   int index = -1;
   int temp[WINDOW_SIZE*2];
 
@@ -335,6 +342,7 @@ int check_cumulative_ack() {
       if(seq > finalseq) {
         finalseq = seq;
         index = (i % WINDOW_SIZE);
+        seq = 1;
       }
     }
   }
@@ -348,7 +356,9 @@ void B_input (packet) struct pkt packet;
     printf("B_input: packet corrupted.\n");
     return;
   }
-
+ 
+  printf("last ack is -> %d \n", sideB.last_ack);
+ 
   if(packet.seqnum < sideB.last_ack) {
     printf("B_input: recv message: %s\n", packet.payload);
     printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
@@ -360,21 +370,15 @@ void B_input (packet) struct pkt packet;
     if(index >= 0){
       printf("B_input: send ACK for snum -> %d \n", sideB.arrived_snum[index]);
       send_ack(B, sideB.arrived_snum[index]);
+      printf("B_input: index -> %d , arrived_snum -> %d \n",index, sideB.arrived_snum[index]); 
       sideB.last_ack = sideB.arrived_snum[index];
-
+      
       tolayer5(packet.payload);
     } else if(index < 0 && sideB.last_ack != -1) {
       printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
       send_ack(B, sideB.last_ack);
     }
   }
-  /* if (packet.seqnum == sideB.base) {
-    sideB.base++;
-    printf("B_input: update snum -> %d \n", sideB.base);
-  } else {
-    send_ack(B, packet.seqnum);
-    // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
-  } */
 }
 
 
