@@ -76,7 +76,7 @@ struct senderSide {
   int snum; //next sequence number
   int window_size_A; // index of the last element -> window_size_A - base = WINDOW_SIZE;
   int buffer_size;
-  int count_duplicate_acks;
+  // int count_duplicate_acks;
   double rtt;
 } sideA;
 
@@ -96,10 +96,10 @@ struct Node
 // Two global variables to store address of front and rear nodes. 
 struct Node* front_sended = NULL;
 struct Node* rear_sended = NULL;
+struct Node* point = NULL;
 
 //To enqueue a node in a sended queue.
-void enqueue_sended(char * message) 
-{
+void enqueue_sended(char * message) {
 	struct Node* temp = (struct Node*)malloc(sizeof(struct Node));
   temp->data = malloc(sizeof(char[20]));
   for(int i = 0; i < 20; i++)
@@ -110,13 +110,25 @@ void enqueue_sended(char * message)
 		front_sended = rear_sended = temp;
 		return;
 	}
+  point = front_sended;
 	rear_sended->next = temp;
 	rear_sended = temp;
 }
 
+void move_point_on(){
+  if(point == NULL)
+    return;
+  point = point->next;
+}
+
+char * p_point() {
+  if(point == NULL)
+		return NULL;
+	return point->data;
+}
+
 // To dequeue a node in the sended queue.
-void dequeue_sended() 
-{
+void dequeue_sended() {
 	struct Node* temp = front_sended;
 	if(front_sended == NULL)
 		return;
@@ -130,8 +142,7 @@ void dequeue_sended()
 }
 
 //pop front.
-char * p_front_sended() 
-{
+char * p_front_sended() {
 	if(front_sended == NULL)
 		return NULL;
 	return front_sended->data;
@@ -149,6 +160,7 @@ int get_checksum(struct pkt *packet) {
 // Two global variables to store address of front and rear nodes. 
 struct Node* front = NULL;
 struct Node* rear = NULL;
+
 
 //To enqueue_buffer a node.
 void enqueue_buffer(struct msg * message) 
@@ -259,36 +271,44 @@ void A_output (message) struct msg message;
 /* called when A's timer goes off */
 void A_timerinterrupt (void)
 {
-  printf("A_timerinterrupt: A is resending packet: ");
-  for(int i = 0; i < 20; i++) {
-    printf("%c", p_front_sended()[i]);
+  printf("A_timerinterrupt: A is resending packet: \n");
+  while(point != NULL){
+    
+    printf("-> ");
+    for(int i = 0; i < 20; i++)
+      printf("%c", p_point()[i]);
+    
+    printf("\n");
+    struct pkt packet; // do the packet.
+    packet.seqnum = sideA.base;
+    
+    for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
+      packet.payload[i] = p_point()[i];
+    
+    packet.checksum = get_checksum(&packet);
+    tolayer3(A, packet);
+    move_point_on();
   }
-  printf("\n");
-  struct pkt packet; // do the packet.
-  packet.seqnum = sideA.base;
-  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
-    packet.payload[i] = p_front_sended()[i];
-  packet.checksum = get_checksum(&packet);
-  tolayer3(A, packet);
+  point = front_sended;
   starttimer(A, sideA.rtt);
 } 
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(packet) struct pkt packet;
 {	
-  printf("A_input: acknum -> %d , base -> %d \n", packet.acknum, sideA.base);
+  // printf("A_input: acknum -> %d , base -> %d \n", packet.acknum, sideA.base);
   if (packet.checksum != get_checksum(&packet)) {
-    printf("A_input: packet corrupted \n");
+    printf("A_input: ack corrupted \n");
     return;
   } 
   if(packet.acknum < sideA.base) {
-    printf("A_input: duplicate ack. \n");
-    sideA.count_duplicate_acks++;
-    if(sideA.count_duplicate_acks > 2){ // if receiver receive 3 duplicate acks -> stop the timer and resent the base packet.
-      sideA.count_duplicate_acks = 0;
-      stoptimer(A);
-      A_timerinterrupt();
-    }
+    printf("A_input: received duplicate ack %d. \n", packet.acknum);
+    // sideA.count_duplicate_acks++;
+    // if(sideA.count_duplicate_acks > 2){ // if receiver receive 3 duplicate acks -> stop the timer and resent the base packet.
+    //   sideA.count_duplicate_acks = 0;
+    //   stoptimer(A);
+    //   A_timerinterrupt();
+    // }
     return;
   }
 
@@ -315,12 +335,12 @@ void A_input(packet) struct pkt packet;
 void A_init (void)
 {
   sideA.timer_state = 0;
-  sideA.rtt = 20;
+  sideA.rtt = 30;
   sideA.base = 0;
   sideA.snum = FIRST_SEQNO;
   sideA.buffer_size = 0;
   sideA.window_size_A = WINDOW_SIZE;
-  sideA.count_duplicate_acks = 0;
+  // sideA.count_duplicate_acks = 0;
 } 
 
 int check_cumulative_ack() {
@@ -333,6 +353,11 @@ int check_cumulative_ack() {
     temp[i+WINDOW_SIZE] = sideB.arrived_snum[i];
   }
   
+  printf("\n ARRAY ACKs -> ");
+  for(int i = 0; i < WINDOW_SIZE * 2; i++) 
+    printf("%d ",temp[i]);
+  printf("\n");
+
   for(int i = 0; i < WINDOW_SIZE * 2 - 1; i++) {
     if(temp[i] == -1)
       break;
@@ -357,7 +382,7 @@ void B_input (packet) struct pkt packet;
     return;
   }
  
-  printf("last ack is -> %d \n", sideB.last_ack);
+  //printf("last ack is -> %d \n", sideB.last_ack);
  
   if(packet.seqnum < sideB.last_ack) {
     printf("B_input: recv message: %s\n", packet.payload);
@@ -370,7 +395,7 @@ void B_input (packet) struct pkt packet;
     if(index >= 0){
       printf("B_input: send ACK for snum -> %d \n", sideB.arrived_snum[index]);
       send_ack(B, sideB.arrived_snum[index]);
-      printf("B_input: index -> %d , arrived_snum -> %d \n",index, sideB.arrived_snum[index]); 
+      // printf("B_input: index -> %d , arrived_snum -> %d \n",index, sideB.arrived_snum[index]); 
       sideB.last_ack = sideB.arrived_snum[index];
       
       tolayer5(packet.payload);
