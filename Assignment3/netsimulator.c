@@ -81,10 +81,10 @@ struct senderSide {
 } sideA;
 
 struct receiverSide {
-  int base;
   int last_ack;
   int * arrived_snum;
   int window_size_B;
+  int expected_ack;
 } sideB;
 
 struct Node 
@@ -271,6 +271,7 @@ void A_output (message) struct msg message;
 /* called when A's timer goes off */
 void A_timerinterrupt (void)
 {
+  int increment = 0; // to send the correct sequence number.
   printf("A_timerinterrupt: A is resending packet: \n");
   while(point != NULL){
     
@@ -280,7 +281,7 @@ void A_timerinterrupt (void)
     
     printf("\n");
     struct pkt packet; // do the packet.
-    packet.seqnum = sideA.base;
+    packet.seqnum = sideA.base + increment; // base + increment = correct sequence number.
     
     for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
       packet.payload[i] = p_point()[i];
@@ -288,6 +289,7 @@ void A_timerinterrupt (void)
     packet.checksum = get_checksum(&packet);
     tolayer3(A, packet);
     move_point_on();
+    increment++;
   }
   point = front_sended;
   starttimer(A, sideA.rtt);
@@ -343,35 +345,22 @@ void A_init (void)
   // sideA.count_duplicate_acks = 0;
 } 
 
-int check_cumulative_ack() {
-  int seq = 1, finalseq = 0;
-  int index = -1;
-  int temp[WINDOW_SIZE*2];
-
-  for(int i = 0; i < WINDOW_SIZE; i++){ // double array to bypass circles.
-    temp[i] = sideB.arrived_snum[i];
-    temp[i+WINDOW_SIZE] = sideB.arrived_snum[i];
-  }
-  
-  printf("\n ARRAY ACKs -> ");
-  for(int i = 0; i < WINDOW_SIZE * 2; i++) 
-    printf("%d ",temp[i]);
-  printf("\n");
-
-  for(int i = 0; i < WINDOW_SIZE * 2 - 1; i++) {
-    if(temp[i] == -1)
-      break;
-    if(temp[i+1] == temp[i] + 1)
-      seq++;
-    else {
-      if(seq > finalseq) {
-        finalseq = seq;
-        index = (i % WINDOW_SIZE);
-        seq = 1;
-      }
+/*Recursive function to calculate the expected ack.*/
+int check_expected_ack(int exp){
+  for(int i = 0; i < WINDOW_SIZE; i++){
+    if(sideB.arrived_snum[i] == exp) {
+      return check_expected_ack(exp + 1);
     }
   }
-  return index;
+  return exp;
+}
+
+/*Utility function for debug.*/
+void print_array(){
+  printf("ARRAY -> ");
+  for(int i = 0; i < WINDOW_SIZE; i++)
+    printf("%d ",sideB.arrived_snum[i]);
+  printf("\n");
 }
 
 /* called from layer 3, when a packet arrives for layer 4 at B*/
@@ -382,8 +371,7 @@ void B_input (packet) struct pkt packet;
     return;
   }
  
-  //printf("last ack is -> %d \n", sideB.last_ack);
- 
+  // TO DEBUG printf("last ack is -> %d, seqnum -> %d \n", sideB.last_ack, packet.seqnum);
   if(packet.seqnum < sideB.last_ack) {
     printf("B_input: recv message: %s\n", packet.payload);
     printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
@@ -391,13 +379,14 @@ void B_input (packet) struct pkt packet;
   } else {
     printf("B_input: recv message: %s\n", packet.payload);
     sideB.arrived_snum[(packet.seqnum % sideB.window_size_B)] = packet.seqnum;
-    int index = check_cumulative_ack();
+    //TO DEBUG print_array();
+    int index = (check_expected_ack(sideB.expected_ack) - 1) % WINDOW_SIZE;
     if(index >= 0){
       printf("B_input: send ACK for snum -> %d \n", sideB.arrived_snum[index]);
       send_ack(B, sideB.arrived_snum[index]);
       // printf("B_input: index -> %d , arrived_snum -> %d \n",index, sideB.arrived_snum[index]); 
       sideB.last_ack = sideB.arrived_snum[index];
-      
+      sideB.expected_ack = check_expected_ack(sideB.expected_ack);
       tolayer5(packet.payload);
     } else if(index < 0 && sideB.last_ack != -1) {
       printf("B_input: send ACK for snum -> %d \n", sideB.last_ack);
@@ -411,7 +400,7 @@ void B_input (packet) struct pkt packet;
 /* entity B routines are called. You can use it to do any initialization */
 void B_init (void)
 {
-  sideB.base = 0;
+  sideB.expected_ack = 0;
   sideB.window_size_B = WINDOW_SIZE;
   sideB.last_ack = -1;
   sideB.arrived_snum = malloc(sizeof(int) * WINDOW_SIZE);
