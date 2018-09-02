@@ -70,17 +70,19 @@ extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
 
+/*Utility structure for sender.*/
 struct senderSide {
   int state;
   int seqN;
-  double rtt;
   struct pkt last_packet;
 } sideA;
 
+/*Utility structure for receiver.*/
 struct receiverSide {
   int seqN;
 } sideB;
 
+/*Struct Node of the buffer queue*/
 struct Node 
 {
 	char * data;
@@ -118,9 +120,7 @@ void dequeue()
 		front = rear = NULL;
 	else 
 		front = front->next;
-	// free(temp->message);
   free(temp);
-  
 }
 
 //pop front.
@@ -143,7 +143,7 @@ int get_checksum(struct pkt *packet) {
 /* called from layer 5, passed the data to be sent to other side */
 void A_output (message) struct msg message;
 {
-  if(sideA.state != WAIT_LAYER5) 
+  if(sideA.state != WAIT_LAYER5) // if it isn't waiting a message from layer 5, it is waiting an ack.
   {
     printf("A_output: a packet is not yet acked. Message enqueued -> ");
     for(int i = 0; i < 20; i++) // to print the payload.
@@ -160,9 +160,9 @@ void A_output (message) struct msg message;
 
   struct pkt packet;
   packet.seqnum = sideA.seqN;
-  for(int i = 0; i < 20; i++) // copy the string -> if i use %s bug because there is not "\0" in the end.
+  for(int i = 0; i < 20; i++) // to copy the string.
     packet.payload[i] = p_front()[i];
-  print("\n");
+  printf("\n");
 
   printf("A_output: packet with snum %d send -> ", sideA.seqN);
   
@@ -174,7 +174,7 @@ void A_output (message) struct msg message;
   sideA.last_packet = packet;
   sideA.state = WAIT_ACK;
   tolayer3(A, packet);
-  starttimer(A, sideA.rtt);
+  starttimer(A, RXMT_TIMEOUT);
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
@@ -214,19 +214,18 @@ void A_timerinterrupt (void)
   }
   printf("\n");
   tolayer3(A, sideA.last_packet);
-  starttimer(A, sideA.rtt);
+  starttimer(A, RXMT_TIMEOUT);
 } 
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 void A_init (void)
 {
-  sideA.rtt = 20;
   sideA.state = WAIT_LAYER5;
   sideA.seqN = 0;
 } 
 
-// function to send an ack.
+/* Utility function to send an ack.*/
 void send_ack(int side, int ack) {
     struct pkt packet;
     packet.acknum = ack;
@@ -250,7 +249,6 @@ void B_input (packet) struct pkt packet;
         printf("B_input: update snum -> %d \n", sideB.seqN);
     } else {
         send_ack(B, (sideB.seqN == SECOND_SEQNO ? FIRST_SEQNO : SECOND_SEQNO));
-        // tolayer5(packet.payload); commented because when a packet is already arrived it was sent to layer5 yet.
     }
 }
 

@@ -77,7 +77,6 @@ struct senderSide {
   int window_size_A; // index of the last element -> window_size_A - base = WINDOW_SIZE;
   int buffer_size;
   // int count_duplicate_acks;
-  double rtt;
 } sideA;
 
 struct receiverSide {
@@ -263,7 +262,7 @@ void A_output (message) struct msg message;
   enqueue_sended(packet.payload); // enqueue the message in the sended queue.
   
   if(sideA.timer_state == 0) { // if the timer is not started yet.
-    starttimer(A, sideA.rtt);
+    starttimer(A, RXMT_TIMEOUT);
     sideA.timer_state = 1;
   }
 }
@@ -292,7 +291,7 @@ void A_timerinterrupt (void)
     increment++;
   }
   point = front_sended;
-  starttimer(A, sideA.rtt);
+  starttimer(A, RXMT_TIMEOUT);
 } 
 
 /* called from layer 3, when a packet arrives for layer 4 */
@@ -327,7 +326,7 @@ void A_input(packet) struct pkt packet;
   
   if(sideA.base < sideA.snum) { // if i have other packets sent restart the timer.
     sideA.timer_state = 1;
-    starttimer(A, sideA.rtt);
+    starttimer(A, RXMT_TIMEOUT);
   }
 }
 
@@ -337,7 +336,6 @@ void A_input(packet) struct pkt packet;
 void A_init (void)
 {
   sideA.timer_state = 0;
-  sideA.rtt = 30;
   sideA.base = 0;
   sideA.snum = FIRST_SEQNO;
   sideA.buffer_size = 0;
