@@ -67,9 +67,20 @@ extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
 
-/********* YOU MAY ADD SOME ROUTINES HERE ********/
+//statistic variables.
+int corrupted = 0;
+int acks = 0;
+int retransmission = 0;
+int packet_transmitted = 0;
+/*To print the final statistics.*/
+void printStatistics(){
+  printf("\n--------------------------------------> STATISTICS <-----------------------------------\n");
+  printf("Original data packet trasmitted: %d \n", packet_transmitted);
+  printf("Number of retransmission: %d \n", retransmission);
+  printf("Number of acks packets: %d \n", acks);
+  printf("Corrupted Packets: %d \n", corrupted);
+}
 
-/********* STUDENTS WRITE THE NEXT SIX ROUTINES *********/
 struct senderSide {
   int timer_state;
   int base;
@@ -114,6 +125,7 @@ void enqueue_sended(char * message) {
 	rear_sended = temp;
 }
 
+// To move the pointer on next element.
 void move_point_on(){
   if(point == NULL)
     return;
@@ -257,10 +269,10 @@ void A_output (message) struct msg message;
 
   tolayer3(A, packet); //send the packet to layer 3
 
-  sideA.snum++; // increment the next sequence number.
+  sideA.snum = (sideA.snum + 1) % LIMIT_SEQNO; // update the next sequence number.
   printf("A_output: update snum -> %d \n", sideA.snum);
   enqueue_sended(packet.payload); // enqueue the message in the sended queue.
-  
+  packet_transmitted++;
   if(sideA.timer_state == 0) { // if the timer is not started yet.
     starttimer(A, RXMT_TIMEOUT);
     sideA.timer_state = 1;
@@ -272,6 +284,7 @@ void A_timerinterrupt (void)
 {
   int increment = 0; // to send the correct sequence number.
   printf("A_timerinterrupt: A is resending packet: \n");
+  retransmission++;
   while(point != NULL){
     
     printf("-> ");
@@ -300,6 +313,7 @@ void A_input(packet) struct pkt packet;
   // printf("A_input: acknum -> %d , base -> %d \n", packet.acknum, sideA.base);
   if (packet.checksum != get_checksum(&packet)) {
     printf("A_input: ack corrupted \n");
+    corrupted++;
     return;
   } 
   if(packet.acknum < sideA.base) {
@@ -315,6 +329,7 @@ void A_input(packet) struct pkt packet;
 
   while(sideA.base <= packet.acknum) {
     printf("A_input: packet with snum %d acked.\n", sideA.base);
+    acks++;
     sideA.base++;
     sideA.window_size_A++;
     dequeue_sended(); // if acked dequeue the first.
@@ -366,6 +381,7 @@ void B_input (packet) struct pkt packet;
 {
   if (packet.checksum != get_checksum(&packet)) {
     printf("B_input: packet corrupted.\n");
+    corrupted++;
     return;
   }
  
@@ -527,6 +543,7 @@ main(int argc, char **argv)
   }
   terminate:
     printf("Simulator terminated at time %.12f\n",time_now);
+    printStatistics();
     return (0);
 }
 
