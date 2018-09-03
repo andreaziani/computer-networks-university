@@ -87,7 +87,6 @@ struct receiver {
 
 // Statistics
 int txPktCount;                 // count of packets sent by A
-int rxPktCount;                 // count of packets received by B
 int corruptPktCount;            // count of corrupted packets received by B
 int rxmtCount;                  // retransmit count
 int commPktCount;               // count of communicated packets (correct acks)
@@ -136,7 +135,7 @@ void A_output(struct msg message)
       printf("\n===================================> THE BUFFER IS FULL, EXIT <============================================\n");
       exit(0);
     }
-    // Next sequence number is within window
+    // Next sequence number is within window -> if not, message isn't sent.
     if (isWithinWindow(sideA.txBase, sideA.nextSeqNum))
     {
         struct pkt new_packet;
@@ -144,7 +143,7 @@ void A_output(struct msg message)
         // Create DATA packet
         new_packet.seqnum = sideA.nextSeqNum;
         new_packet.acknum = 0;
-        memcpy(new_packet.payload, sideA.msgBuffer[sideA.nextMsg].data, sizeof(sideA.msgBuffer[sideA.nextMsg].data));
+        memcpy(new_packet.payload, sideA.msgBuffer[sideA.nextMsg].data, sizeof(sideA.msgBuffer[sideA.nextMsg].data)); // payload copy.
         new_packet.checksum = calcChecksum(new_packet);
 
         // Add to packet buffer
@@ -178,12 +177,12 @@ void A_input(struct pkt packet)
     // No errors and ACK number within window
     if (!isCorrupt(packet) && isWithinWindow(sideA.txBase, packet.acknum))
     {
-        int i, shift;
+        int shift;
 
         printf("  A: Accepting ACK from B...\n");
         // Stop timer
         stoptimer(A);
-        // Find number of times window shifted
+        // Find number of times window shifted -> number of packet correctly acked.
         if (packet.acknum < sideA.txBase)
             shift = packet.acknum - sideA.txBase + LIMIT_SEQNO;
         else
@@ -193,9 +192,9 @@ void A_input(struct pkt packet)
         sideA.txBase = (packet.acknum + 1) % LIMIT_SEQNO;
 
         // Iterate through newly available slots
-        for (i = 0; i < shift + 1; i++)
+        for (int i = 0; i < shift + 1; i++)
         {
-            // Outstanding messages available
+            // if there are outstanding messages available, send this messages to Layer3.
             if (sideA.nextMsg < sideA.msgCount)
             {
                 // Create data packet
@@ -285,7 +284,6 @@ void A_init(void)
 
     // Statistics
     txPktCount = 0;
-    rxPktCount = 0;
     corruptPktCount = 0;
     rxmtCount = 0;
     commPktCount = 0;
@@ -301,9 +299,6 @@ void B_input(struct pkt packet)
     printf("    PAYLOAD: %.*s\n", 19, packet.payload);
 
     struct pkt new_packet;
-
-    // Update packet count
-    rxPktCount++;
 
     // Packet not corrupted and SEQ number is new
     if (!isCorrupt(packet) && packet.seqnum == sideB.expectSeqNum)
@@ -335,7 +330,7 @@ void B_input(struct pkt packet)
 
     // Packet is corrupted or has invalid SEQ number
     else
-    {
+    {  //TODO ricezione fuori ordine
         // Update corrupted packet count
         if (isCorrupt(packet))
             corruptPktCount++;
