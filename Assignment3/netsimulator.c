@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <strings.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/file.h>
@@ -25,7 +26,7 @@
 /* to layer 5 via the students transport level protocol entities.         */
 struct msg {
   char data[20];
-};
+}msg;
 
 /* a packet is the data unit passed from layer 4 (students code) to layer */
 /* 3 (teachers code).  Note the pre-defined packet structure, which all   */
@@ -65,58 +66,329 @@ extern int LIMIT_SEQNO;      // when sequence number reaches this value,        
 extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
+extern int nsimmax;
 
-/********* YOU MAY ADD SOME ROUTINES HERE ********/
+// Entity A
+int txBase;                     // first sequence number of window
+int nextSeqNum;                 // last sequence number within window
+int nextMsg;                    // message index
+struct msg *msgBuffer;                 // message buffer
+struct pkt *txPktBuffer;               // packet buffer
+int msgCount;                   // message count
 
-/********* STUDENTS WRITE THE NEXT SIX ROUTINES *********/
+// Entity B
+int expectSeqNum;               // expected sequence number
+int lastAckNum;                 // last acknowledgement number
 
-/* called from layer 5, passed the data to be sent to other side */
-void
-A_output (message)
-  struct msg message;
+// Statistics
+int txPktCount;                 // count of packets sent by A
+int rxPktCount;                 // count of packets received by B
+int corruptPktCount;            // count of corrupted packets received by B
+int rxmtCount;                  // retransmit count
+int commPktCount;               // count of communicated packets (correct acks)
+int receivedMsgCount;           // count of messages received by B
+
+/* // Print window
+void printWindow(int base)
 {
- 
+    int i, end = (base + WINDOW_SIZE) % LIMIT_SEQNO;
+
+    printf("    WINDOW: [");
+    for (i = base; i != end; i = (i + 1) % LIMIT_SEQNO)
+        printf(" %d", i);
+    printf(" ]\n");
+} */
+
+// Check if number is within window
+int isWithinWindow(int base, int i)
+{
+    // Number is located on the right of base
+    int right = i >= base && i < base + WINDOW_SIZE;
+
+    // Number is located on the left of base
+    int left = i < base && i + LIMIT_SEQNO < base + WINDOW_SIZE;
+    
+    return right || left;
 }
 
-/* called from layer 3, when a packet arrives for layer 4 */
-void
-A_input(packet)
-  struct pkt packet;
-{	
-
+// Calculate checksum of packet
+int calcChecksum(struct pkt packet)
+{
+    int checksum = 0;
+    checksum += packet.seqnum;
+    checksum += packet.acknum;
+    for (int i = 0; i < 20; i++)
+        checksum += packet.payload[i];
+    return checksum;
 }
 
-/* called when A's timer goes off */
-void
-A_timerinterrupt (void)
+// Check packet for errors
+int isCorrupt(struct pkt packet)
 {
-
-} 
-
-/* the following routine will be called once (only) before any other */
-/* entity A routines are called. You can use it to do any initialization */
-void
-A_init (void)
-{
-
-} 
-
-/* called from layer 3, when a packet arrives for layer 4 at B*/
-void
-B_input (packet)
-  struct pkt packet;
-{
-
+    return calcChecksum(packet) - packet.checksum;
 }
 
-
-/* the following rouytine will be called once (only) before any other */
-/* entity B routines are called. You can use it to do any initialization */
-void
-B_init (void)
+// Called from layer 5, pass the data to be sent to other side
+void A_output(struct msg message)
 {
+    printf("  A: Receiving MSG from layer 5...\n");
+    printf("    DATA: %.*s\n", 19, message.data);
+    // printWindow(txBase);
 
+    // Add message to buffer and update message count
+    msgBuffer[msgCount] = message;
+    msgCount++;
+
+    // Next sequence number is within window
+    if (isWithinWindow(txBase, nextSeqNum))
+    {
+        struct pkt new_packet;
+
+        // Create DATA packet
+        new_packet.seqnum = nextSeqNum;
+        new_packet.acknum = 0;
+        memcpy(new_packet.payload, msgBuffer[nextMsg].data, sizeof(msgBuffer[nextMsg].data));
+        new_packet.checksum = calcChecksum(new_packet);
+
+        // Add to packet buffer
+        txPktBuffer[nextSeqNum] = new_packet;
+
+        // Send packet to network
+        printf("  A: Sending new DATA to B...\n");
+        printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+        // printf("    CHECKSUM: %d\n", new_packet.checksum);
+        printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+        // printWindow(txBase);
+        tolayer3(A, new_packet);
+        txPktCount++;
+        // Set timer if packet is first in window
+        if (nextSeqNum == txBase)
+            starttimer(A, RXMT_TIMEOUT);
+
+        // Update next sequence number
+        nextSeqNum = (nextSeqNum + 1) % LIMIT_SEQNO;
+
+        // Update next message index
+        nextMsg++;
+    }
+}
+
+// Called from layer 3, when a packet arrives for layer 4 
+void A_input(struct pkt packet)
+{
+    printf("  A: Receiving ACK from B...\n");
+    printf("    SEQ, ACK: %d, %d\n", packet.seqnum, packet.acknum);
+    // printf("    CHECKSUM: %d\n", packet.checksum);
+    printf("    PAYLOAD: %.*s\n", 19, packet.payload);
+    // printWindow(txBase);
+
+    // No errors and ACK number within window
+    if (!isCorrupt(packet) && isWithinWindow(txBase, packet.acknum))
+    {
+        int i, shift;
+
+        printf("  A: Accepting ACK from B...\n");
+
+        
+
+        // Stop timer
+        stoptimer(A);
+
+        // Find number of times window shifted
+        if (packet.acknum < txBase)
+            shift = packet.acknum - txBase + LIMIT_SEQNO;
+        else
+            shift = packet.acknum - txBase;
+
+        // Update base
+        txBase = (packet.acknum + 1) % LIMIT_SEQNO;
+
+        // Iterate through newly available slots
+        for (i = 0; i < shift + 1; i++)
+        {
+            // Outstanding messages available
+            if (nextMsg < msgCount)
+            {
+
+                // Create DATA packet
+                struct pkt new_packet;
+                new_packet.seqnum = nextSeqNum;
+                new_packet.acknum = 0;
+                memcpy(new_packet.payload, msgBuffer[nextMsg].data, sizeof(msgBuffer[nextMsg].data));
+                new_packet.checksum = calcChecksum(new_packet);
+
+                // Add to packet buffer
+                txPktBuffer[nextSeqNum] = new_packet;
+
+                // Send packet to network
+                printf("  A: Sending new DATA to B...\n");
+                printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+                // printf("    CHECKSUM: %d\n", new_packet.checksum);
+                printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+                // printWindow(txBase);
+                tolayer3(A, new_packet);
+
+                //packet trasmitted.
+                txPktCount++;
+
+                // Update next sequence number
+                nextSeqNum = (nextSeqNum + 1) % LIMIT_SEQNO;
+
+                // Update next message index
+                nextMsg++;
+            }
+            commPktCount++;
+        }
+
+        // Set timer if there are still packets to send
+        if (txBase != nextSeqNum)
+            starttimer(A, RXMT_TIMEOUT);
+    }
+    else
+    {
+        if(isCorrupt(packet)) // corrupted acks.
+          corruptPktCount++;
+        // Discard packet
+        printf("  A: Rejecting ACK from B... (pending ACK %d)\n", txBase);
+        // printWindow(txBase);
+    }
+}
+
+// Called when A's timer goes off
+void A_timerinterrupt(void)
+{
+    struct pkt new_packet;
+    int i = txBase;
+
+    // Iterate through window
+    while (i != nextSeqNum)
+    {
+        // Resend packet to network
+        new_packet = txPktBuffer[i];
+        printf("  A: Resending DATA to B...\n");
+        printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+        // printf("    CHECKSUM: %d\n", new_packet.checksum);
+        printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+        // printWindow(txBase);
+        tolayer3(A, new_packet);
+
+        // Update transmit and retransmit counts
+        txPktCount++;
+        rxmtCount++;
+
+        // Iterate
+        i = (i + 1) % LIMIT_SEQNO;
+    }
+
+    // Set timer
+    starttimer(A, RXMT_TIMEOUT);
 } 
+
+// Called once before any other entity A routines are called
+void A_init(void)
+{
+    // Allocate buffers
+    nextMsg = 0;
+    msgCount = 0;
+    msgBuffer = (struct msg *) malloc(sizeof(struct msg) * nsimmax);
+    txPktBuffer = (struct pkt *) malloc(sizeof(struct pkt) * LIMIT_SEQNO);
+
+    // State variables
+    txBase = FIRST_SEQNO;
+    nextSeqNum = FIRST_SEQNO;
+
+    // Statistics
+    txPktCount = 0;
+    rxPktCount = 0;
+    corruptPktCount = 0;
+    rxmtCount = 0;
+    commPktCount = 0;
+    receivedMsgCount = 0;
+} 
+
+// Called from layer 3, when a packet arrives for layer 4 at B
+void B_input(struct pkt packet)
+{
+    printf("  B: Receiving DATA from A...\n");
+    printf("    SEQ, ACK: %d, %d\n", packet.seqnum, packet.acknum);
+    // printf("    CHECKSUM: %d\n", packet.checksum);
+    printf("    PAYLOAD: %.*s\n", 19, packet.payload);
+
+    struct pkt new_packet;
+
+    // Update packet count
+    rxPktCount++;
+
+    // Packet not corrupted and SEQ number is new
+    if (!isCorrupt(packet) && packet.seqnum == expectSeqNum)
+    {
+        // Send message to above
+        tolayer5(packet.payload);
+
+        // Update received message count
+        receivedMsgCount++;
+
+        // Create ACK packet
+        new_packet.seqnum = 0;
+        new_packet.acknum = packet.seqnum;
+        memcpy(new_packet.payload, packet.payload, sizeof(packet.payload));
+        new_packet.checksum = calcChecksum(new_packet);
+
+        // Send packet to network
+        printf("  B: Sending new ACK to A...\n");
+        printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+        // printf("    CHECKSUM: %d\n", new_packet.checksum);
+        printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+        tolayer3(B, new_packet);
+
+        // Record ACK number
+        lastAckNum = new_packet.acknum;
+
+        // Update expected sequence number
+        expectSeqNum = (expectSeqNum + 1) % LIMIT_SEQNO;
+    }
+
+    // Packet is corrupted or has invalid SEQ number
+    else
+    {
+        // Update corrupted packet count
+        if (isCorrupt(packet))
+            corruptPktCount++;
+
+        // Create ACK packet for previously acknowledged DATA packet
+        new_packet.seqnum = 0;
+        new_packet.acknum = lastAckNum;
+        memcpy(new_packet.payload, packet.payload, sizeof(packet.payload));
+        new_packet.checksum = calcChecksum(new_packet);
+
+        // Send packet to network
+        printf("  B: Resending previous ACK to A...\n");
+        printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+        // printf("    CHECKSUM: %d\n", new_packet.checksum);
+        printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+        tolayer3(B, new_packet);
+    }
+}
+
+// Called once before any other entity B routines are called
+void B_init(void)
+{
+    // State variables
+    expectSeqNum = FIRST_SEQNO;
+    lastAckNum = FIRST_SEQNO - 1 < 0 ? LIMIT_SEQNO - 1 : FIRST_SEQNO - 1;
+} 
+
+// Called at end of simulation to print final statistics
+void Simulation_done()
+{
+    printf("\n STATISTICS:\n");
+    printf("  Messages arrived to A:  %d\n", msgCount);
+    printf("  Packets sent from A:    %d\n", txPktCount);
+    printf("  Packets retransmitted:  %d\n", rxmtCount);
+    printf("  Correct acks:           %d\n", commPktCount);
+    printf("  Corrupted packets:      %d\n", corruptPktCount);
+    printf("\n");
+}
 
 /*****************************************************************
 ***************** NETWORK EMULATION CODE STARTS BELOW ***********
@@ -239,6 +511,7 @@ main(int argc, char **argv)
   }
   terminate:
     printf("Simulator terminated at time %.12f\n",time_now);
+    Simulation_done();
     return (0);
 }
 
@@ -429,8 +702,7 @@ double increment;
 
 
 /************************** TOLAYER3 ***************/
-void
-tolayer3(AorB,packet)
+void tolayer3(AorB,packet)
 int AorB;  /* A or B is trying to stop timer */
 struct pkt packet;
 {
@@ -498,8 +770,7 @@ struct pkt packet;
   insertevent(evptr);
 }
 
-void
-tolayer5(datasent)
+void tolayer5(datasent)
   char datasent[20];
 {
   write(fileoutput,datasent,20);
