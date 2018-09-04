@@ -83,6 +83,9 @@ struct sender {
 struct receiver {
   int expectSeqNum;               // expected sequence number
   int lastAckNum;                 // last acknowledgement number
+  int lastSeqNum;                 // last seqnumber ackowleged.
+  struct pkt * arrived_packets;
+  int * sendedToLayer5;
 }sideB;
 
 // Statistics
@@ -90,7 +93,6 @@ int txPktCount;                 // count of packets sent by A
 int corruptPktCount;            // count of corrupted packets received by B
 int rxmtCount;                  // retransmit count
 int commPktCount;               // count of communicated packets (correct acks)
-int receivedMsgCount;           // count of messages received by B
 
 // Check if number is within window
 int isWithinWindow(int base, int i)
@@ -287,9 +289,29 @@ void A_init(void)
     corruptPktCount = 0;
     rxmtCount = 0;
     commPktCount = 0;
-    receivedMsgCount = 0;
-
 } 
+
+/*Recursive function to calculate the correct ack.*/
+int check_correct_ack(int exp){
+  int index = exp % WINDOW_SIZE;
+  if(sideB.arrived_packets[index].seqnum == exp) {
+    return check_correct_ack((exp + 1) % LIMIT_SEQNO);
+  }
+  return exp;
+}
+
+/*Recursive function to send to layer 5 the correct packets.*/
+int send_toLayer5(int exp){
+  int i = exp % WINDOW_SIZE;
+  if(sideB.arrived_packets[i].seqnum == exp) {
+    if(sideB.sendedToLayer5[i] == 0) {
+      tolayer5(sideB.arrived_packets[i].payload);
+      sideB.sendedToLayer5[i] = 1;
+    }
+    return send_toLayer5((exp + 1) % LIMIT_SEQNO);
+  }
+  return exp;
+}
 
 // Called from layer 3, when a packet arrives for layer 4 at B
 void B_input(struct pkt packet)
@@ -297,50 +319,92 @@ void B_input(struct pkt packet)
     printf("  B: Receiving DATA from A...\n");
     printf("    SEQ, ACK: %d, %d\n", packet.seqnum, packet.acknum);
     printf("    PAYLOAD: %.*s\n", 19, packet.payload);
-
+    printf("    EXPECTED SNUM: %d\n",sideB.expectSeqNum);
     struct pkt new_packet;
-
     // Packet not corrupted and SEQ number is new
-    if (!isCorrupt(packet) && packet.seqnum == sideB.expectSeqNum)
+    if (!isCorrupt(packet))
     {
-        // Send message to above
-        tolayer5(packet.payload);
+      if(packet.seqnum >= sideB.expectSeqNum && packet.seqnum < sideB.expectSeqNum + WINDOW_SIZE){
+        // insert the new seqnumber in the buffer.
+        sideB.sendedToLayer5[(packet.seqnum % WINDOW_SIZE)] = 0;
+        sideB.arrived_packets[(packet.seqnum % WINDOW_SIZE)].seqnum = packet.seqnum; 
+        memcpy(sideB.arrived_packets[packet.seqnum % WINDOW_SIZE].payload, packet.payload, sizeof(packet.payload)); 
+        int index = (check_correct_ack(sideB.expectSeqNum)) % WINDOW_SIZE;
+        printf("  B: index %d\n", index);
+        if(index == 0 && sideB.arrived_packets[index].seqnum == -1) { // packet 0 isn't received yet.
+          new_packet.seqnum = 0;
+          new_packet.acknum = sideB.lastAckNum;
+          memcpy(new_packet.payload, packet.payload, sizeof(packet.payload));
+          new_packet.checksum = calcChecksum(new_packet);
+          // Send packet to network
+          printf("  B: Resending previous ACK to A...\n");
+          printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+          printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+          tolayer3(B, new_packet);
+        } else { // send the ack for the correct packet.
+          if(index > 0)
+            index--;
+          else 
+            index = WINDOW_SIZE - 1;
 
-        // Update received message count
-        receivedMsgCount++;
-
-        // Create ACK packet
+          send_toLayer5(sideB.lastSeqNum);
+          new_packet.seqnum = 0;
+          new_packet.acknum = sideB.arrived_packets[index].seqnum;
+          memcpy(new_packet.payload, sideB.arrived_packets[index].payload, sizeof(sideB.arrived_packets[index].payload));
+          new_packet.checksum = calcChecksum(new_packet);
+          sideB.lastAckNum = new_packet.acknum;
+          sideB.lastSeqNum = new_packet.acknum;
+          // Update expected sequence number
+          sideB.expectSeqNum = (new_packet.acknum + 1) % LIMIT_SEQNO;
+          // Send packet to network
+          printf("  B: Sending ACK to A...\n");
+          printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+          printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+          tolayer3(B, new_packet);
+        }
+      }
+      else if (packet.seqnum < sideB.expectSeqNum && packet.seqnum >= sideB.expectSeqNum - WINDOW_SIZE){
+        // Create ACK packet for previously acknowledged DATA packet
         new_packet.seqnum = 0;
-        new_packet.acknum = packet.seqnum;
-        memcpy(new_packet.payload, packet.payload, sizeof(packet.payload));
+        new_packet.acknum = sideB.lastAckNum;
+        memcpy(new_packet.payload, sideB.arrived_packets[sideB.lastAckNum % WINDOW_SIZE].payload, sizeof(sideB.arrived_packets[sideB.lastAckNum % WINDOW_SIZE].payload));
         new_packet.checksum = calcChecksum(new_packet);
 
         // Send packet to network
-        printf("  B: Sending new ACK to A...\n");
+        printf("  B: Resending previous ACK to A...\n");
         printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
         printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
         tolayer3(B, new_packet);
-
-        // Record ACK number
+      } else if(packet.seqnum < sideB.expectSeqNum && packet.seqnum < sideB.expectSeqNum - WINDOW_SIZE) { // passed the limit seqno.
+        sideB.sendedToLayer5[packet.seqnum % WINDOW_SIZE] = 0;
+        // insert the new seqnumber in the buffer.
+        sideB.arrived_packets[(packet.seqnum % WINDOW_SIZE)].seqnum = packet.seqnum; 
+        memcpy(sideB.arrived_packets[packet.seqnum % WINDOW_SIZE].payload, packet.payload, sizeof(packet.payload)); 
+        int index = check_correct_ack(sideB.expectSeqNum) % WINDOW_SIZE;
+        send_toLayer5(sideB.lastSeqNum);
+        new_packet.seqnum = 0;
+        new_packet.acknum = sideB.arrived_packets[index].seqnum;
+        memcpy(new_packet.payload, sideB.arrived_packets[index].payload, sizeof(sideB.arrived_packets[index].payload));
+        new_packet.checksum = calcChecksum(new_packet);
         sideB.lastAckNum = new_packet.acknum;
-
-        // Update expected sequence number
-        sideB.expectSeqNum = (sideB.expectSeqNum + 1) % LIMIT_SEQNO;
+        sideB.lastSeqNum = new_packet.acknum;
+        // Send packet to network
+        printf("  B: Resending previous ACK to A...\n");
+        printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
+        printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
+        tolayer3(B, new_packet);
+      }
     }
-
-    // Packet is corrupted or has invalid SEQ number
+    // Packet is corrupted
     else
-    {  //TODO ricezione fuori ordine
+    {  
         // Update corrupted packet count
-        if (isCorrupt(packet))
-            corruptPktCount++;
-
+        corruptPktCount++;
         // Create ACK packet for previously acknowledged DATA packet
         new_packet.seqnum = 0;
         new_packet.acknum = sideB.lastAckNum;
         memcpy(new_packet.payload, packet.payload, sizeof(packet.payload));
         new_packet.checksum = calcChecksum(new_packet);
-
         // Send packet to network
         printf("  B: Resending previous ACK to A...\n");
         printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
@@ -355,6 +419,14 @@ void B_init(void)
     // State variables
     sideB.expectSeqNum = FIRST_SEQNO;
     sideB.lastAckNum = FIRST_SEQNO - 1 < 0 ? LIMIT_SEQNO - 1 : FIRST_SEQNO - 1;
+    sideB.arrived_packets = (struct pkt *) malloc(sizeof(struct pkt) * WINDOW_SIZE);
+    sideB.sendedToLayer5 = malloc(sizeof(int)*WINDOW_SIZE);
+    for(int i = 0; i < WINDOW_SIZE; i++){
+      sideB.arrived_packets[i].seqnum = -1;
+      sideB.sendedToLayer5[i] = 0;
+    }
+    sideB.lastSeqNum = 0;
+
 } 
 
 // Called at end of simulation to print final statistics
