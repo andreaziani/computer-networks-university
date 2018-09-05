@@ -62,20 +62,20 @@ void	stoptimer(int AorB);
    routines --------------------------------------------------------------*/
 
 extern int WINDOW_SIZE;      // size of the window
-extern int LIMIT_SEQNO;      // when sequence number reaches this value,                                     // it wraps around
+extern int LIMIT_SEQNO;      // when sequence number reaches this value, wraps around.                                  
 extern double RXMT_TIMEOUT;  // retransmission timeout
 extern int TRACE;            // trace level, for your debug purpose
 extern double time_now;      // simulation time, for your debug purpose
 
 // Entity A
 struct sender {
-  int txBase;                     // first sequence number of window
+  int base;                     // first sequence number of window
   int nextSeqNum;                 // last sequence number within window
   int nextMsg;                    // message index
   struct msg *msgBuffer;                 // message buffer
-  struct pkt *txPktBuffer;               // packet buffer
+  struct pkt *packetBuffer;               // packet buffer
   int msgCount;                   // message count
-  int buffer_dim;
+  int buffer_dim;                 // current buffer dimension
 }sideA;
 
 
@@ -83,10 +83,10 @@ struct sender {
 struct receiver {
   int expectSeqNum;               // expected sequence number
   int lastAckNum;                 // last acknowledgement number
-  int isFirstIteration;
-  struct pkt * arrived_packets;
-  int * sendedToLayer5;
-  int lastSeqNum;
+  int isFirstIteration;           // utility variable
+  struct pkt * arrived_packets;   // buffer of arrived packets
+  int * sendedToLayer5;           // utilty array
+  int lastSeqNum;                 // last sequence number corretly received.
 }sideB;
 
 // Statistics
@@ -139,7 +139,7 @@ void A_output(struct msg message)
       exit(0);
     }
     // Next sequence number is within window -> if not, message isn't sent.
-    if (isWithinWindow(sideA.txBase, sideA.nextSeqNum))
+    if (isWithinWindow(sideA.base, sideA.nextSeqNum))
     {
         struct pkt new_packet;
 
@@ -150,7 +150,7 @@ void A_output(struct msg message)
         new_packet.checksum = calcChecksum(new_packet);
 
         // Add to packet buffer
-        sideA.txPktBuffer[sideA.nextSeqNum] = new_packet;
+        sideA.packetBuffer[sideA.nextSeqNum] = new_packet;
 
         // Send packet to network
         printf("  A: Sending new DATA to B...\n");
@@ -159,7 +159,7 @@ void A_output(struct msg message)
         tolayer3(A, new_packet);
         txPktCount++;
         // Set timer if packet is first in window
-        if (sideA.nextSeqNum == sideA.txBase)
+        if (sideA.nextSeqNum == sideA.base)
             starttimer(A, RXMT_TIMEOUT);
 
         // Update next sequence number
@@ -178,7 +178,7 @@ void A_input(struct pkt packet)
     printf("    PAYLOAD: %.*s\n", 19, packet.payload);
 
     // No errors and ACK number within window
-    if (!isCorrupt(packet) && isWithinWindow(sideA.txBase, packet.acknum))
+    if (!isCorrupt(packet) && isWithinWindow(sideA.base, packet.acknum))
     {
         int shift;
 
@@ -186,13 +186,13 @@ void A_input(struct pkt packet)
         // Stop timer
         stoptimer(A);
         // Find number of times window shifted -> number of packet correctly acked.
-        if (packet.acknum < sideA.txBase)
-            shift = packet.acknum - sideA.txBase + LIMIT_SEQNO;
+        if (packet.acknum < sideA.base)
+            shift = packet.acknum - sideA.base + LIMIT_SEQNO;
         else
-            shift = packet.acknum - sideA.txBase;
+            shift = packet.acknum - sideA.base;
 
         // Update base
-        sideA.txBase = (packet.acknum + 1) % LIMIT_SEQNO;
+        sideA.base = (packet.acknum + 1) % LIMIT_SEQNO;
 
         // Iterate through newly available slots
         for (int i = 0; i < shift + 1; i++)
@@ -208,7 +208,7 @@ void A_input(struct pkt packet)
                 new_packet.checksum = calcChecksum(new_packet);
                 
                 // Add to packet buffer
-                sideA.txPktBuffer[sideA.nextSeqNum] = new_packet;
+                sideA.packetBuffer[sideA.nextSeqNum] = new_packet;
 
                 // Send packet to network
                 printf("  A: Sending new DATA to B...\n");
@@ -230,7 +230,7 @@ void A_input(struct pkt packet)
         }
 
         // Set timer if there are still packets to send
-        if (sideA.txBase != sideA.nextSeqNum)
+        if (sideA.base != sideA.nextSeqNum)
             starttimer(A, RXMT_TIMEOUT);
     }
     else
@@ -238,7 +238,7 @@ void A_input(struct pkt packet)
         if(isCorrupt(packet)) // corrupted acks.
           corruptPktCount++;
         // Discard packet
-        printf("  A: Rejecting ACK from B... (pending ACK %d)\n", sideA.txBase);
+        printf("  A: Rejecting ACK from B... (pending ACK %d)\n", sideA.base);
     }
 }
 
@@ -246,18 +246,18 @@ void A_input(struct pkt packet)
 void A_timerinterrupt(void)
 {
     struct pkt new_packet;
-    int i = sideA.txBase;
+    int i = sideA.base;
 
     // Iterate through window
     while (i != sideA.nextSeqNum)
     {
         // Resend packet to network
-        new_packet = sideA.txPktBuffer[i];
+        new_packet = sideA.packetBuffer[i];
         printf("  A: Resending DATA to B...\n");
         printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
         // printf("    CHECKSUM: %d\n", new_packet.checksum);
         printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
-        // printWindow(txBase);
+        // printWindow(base);
         tolayer3(A, new_packet);
 
         // Update transmit and retransmit counts
@@ -279,10 +279,10 @@ void A_init(void)
     sideA.nextMsg = 0;
     sideA.msgCount = 0;
     sideA.msgBuffer = (struct msg *) malloc(sizeof(struct msg) * MAX_BUFFER_SIZE);
-    sideA.txPktBuffer = (struct pkt *) malloc(sizeof(struct pkt) * LIMIT_SEQNO);
+    sideA.packetBuffer = (struct pkt *) malloc(sizeof(struct pkt) * LIMIT_SEQNO);
     sideA.buffer_dim = 0;
     // State variables
-    sideA.txBase = FIRST_SEQNO;
+    sideA.base = FIRST_SEQNO;
     sideA.nextSeqNum = FIRST_SEQNO;
 
     // Statistics
