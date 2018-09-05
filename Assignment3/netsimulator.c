@@ -69,11 +69,11 @@ extern double time_now;      // simulation time, for your debug purpose
 
 // Entity A
 struct sender {
-  int base;                     // first sequence number of window
+  int base;                       // first sequence number of window
   int nextSeqNum;                 // last sequence number within window
   int nextMsg;                    // message index
-  struct msg *msgBuffer;                 // message buffer
-  struct pkt *packetBuffer;               // packet buffer
+  struct msg *msgBuffer;          // message buffer
+  struct pkt *packetBuffer;       // packet buffer
   int msgCount;                   // message count
   int buffer_dim;                 // current buffer dimension
 }sideA;
