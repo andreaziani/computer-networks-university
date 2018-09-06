@@ -365,7 +365,7 @@ void B_input(struct pkt packet)
           
           tolayer3(B, new_packet);
         }
-      } else if(packet.seqnum < sideB.expectSeqNum && packet.seqnum < sideB.expectSeqNum - WINDOW_SIZE) { // passed the limit seqno.
+      } else if(packet.seqnum < sideB.expectSeqNum && packet.seqnum < sideB.expectSeqNum - WINDOW_SIZE) { // passed the limit seqno case -> when from snum 15 pass to 0.
         sideB.sendedToLayer5[packet.seqnum % WINDOW_SIZE] = 0;
         // insert the new seqnumber in the buffer.
         sideB.arrived_packets[(packet.seqnum % WINDOW_SIZE)].seqnum = packet.seqnum; 
