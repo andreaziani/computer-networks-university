@@ -379,8 +379,9 @@ void B_input(struct pkt packet)
         new_packet.checksum = calcChecksum(new_packet);
         sideB.lastAckNum = new_packet.acknum;
         sideB.lastSeqNum = sideB.lastAckNum;
+        sideB.expectSeqNum = (new_packet.acknum + 1) % LIMIT_SEQNO; // update expected seq num.
         // Send packet to network
-        printf("  B: Resending previous ACK to A...\n");
+        printf("  B: Sending ACK to A...\n");
         printf("    SEQ, ACK: %d, %d\n", new_packet.seqnum, new_packet.acknum);
         printf("    PAYLOAD: %.*s\n", 19, new_packet.payload);
         tolayer3(B, new_packet);
