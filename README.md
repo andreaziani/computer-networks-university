@@ -4,7 +4,7 @@ This repo contains implementation of the assignments given at computer networks 
 
 ## Assigments
 
-### nc_emulator
+### Assignment 1
 This is a simple Netcat emulator running on UDP protocol.
 
 ### Assignment2
