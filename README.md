@@ -1,6 +1,6 @@
 # Computer networks assignments.
 
-Implementation of the assignments given at computer networks course.
+Implementation of three assignments given at computer networks course.
 
 ## Assigments
 
